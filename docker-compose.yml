@@ -1,0 +1,40 @@
+# docker-compose.yml — Trivy Docker Image Scanner
+#
+# Usage:
+#   docker compose up -d        # start in background
+#   docker compose logs -f      # follow logs
+#   docker compose down         # stop & remove
+#
+# Open: http://localhost:8000
+#
+services:
+  trivy-scanner:
+    # Pull the published image from the private registry.
+    # For local development, comment `image:` and uncomment `build: .` instead.
+    image: registry-dev.e-invoice.gov.kh/security-app/trivy-scan-app:1.0.0
+    # build: .
+    container_name: trivy-scanner
+    restart: unless-stopped
+
+    ports:
+      - "8000:8000"
+
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8000"
+
+    volumes:
+      # Talk to the host's Docker engine via the mounted socket.
+      # NOTE: this gives the container root-equivalent access to your Docker
+      # engine. Only run with images you trust, and avoid this in production.
+      - /var/run/docker.sock:/var/run/docker.sock
+
+      # Persist saved .tar files outside the container.
+      - ./tars:/app/tars
+
+      # Persist the Trivy vulnerability DB cache so it doesn't re-download
+      # every time the container restarts.
+      - trivy-db-cache:/root/.cache/trivy
+
+volumes:
+  trivy-db-cache:

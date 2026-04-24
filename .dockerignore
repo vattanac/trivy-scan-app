@@ -1,0 +1,85 @@
+# =============================================================================
+# .dockerignore — keep personal data, secrets, and bulky local files out of the
+# Docker build context (and therefore out of any image you push to a registry).
+# =============================================================================
+
+# --- Python virtualenvs (contain absolute paths with your username) ----------
+venv/
+.venv/
+env/
+ENV/
+
+# --- Python bytecode / caches -------------------------------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# --- Local app outputs --------------------------------------------------------
+# These get re-created at runtime; we don't want them baked into the image.
+bin/
+tars/
+*.tar
+*.tar.gz
+*.tgz
+
+# --- Trivy cache --------------------------------------------------------------
+.trivy/
+trivy-cache/
+
+# --- Secrets / env files ------------------------------------------------------
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.crt
+secrets/
+credentials/
+
+# --- IDE / editor metadata ----------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- VCS ----------------------------------------------------------------------
+.git/
+.gitignore
+.gitattributes
+
+# --- Docker artifacts (no recursion) ------------------------------------------
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
+compose.yml
+compose.*.yml
+
+# --- Documentation / non-source files that may contain personal info ---------
+# README.md is intentionally NOT excluded — it's part of the project.
+# Exclude all .txt files (notes, drafts, project reports) ...
+*.txt
+# ... but KEEP these required project files:
+!requirements.txt
+!requirements-*.txt
+
+# --- OS / temp ----------------------------------------------------------------
+*.log
+*.tmp
+*.bak
+*.orig
+node_modules/
+
+# --- CI / dev tooling configs you don't want in the image --------------------
+.github/
+.gitlab-ci.yml
