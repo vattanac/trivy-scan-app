@@ -57,3 +57,5 @@ Thumbs.db
 *.tmp
 *.bak
 *.orig
+
+.claude
