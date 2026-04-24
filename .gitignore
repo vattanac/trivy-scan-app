@@ -58,4 +58,5 @@ Thumbs.db
 *.bak
 *.orig
 
-.claude
+# --- AI assistant / Claude Code local state ----------------------------------
+.claude/
