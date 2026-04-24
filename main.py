@@ -53,7 +53,12 @@ INDEX_HTML = APP_DIR / "index.html"
 GITHUB_RELEASES_API = "https://api.github.com/repos/aquasecurity/trivy/releases"
 GITHUB_DOWNLOAD_BASE = "https://github.com/aquasecurity/trivy/releases/download"
 
-app = FastAPI(title="Trivy Docker Image Scanner", version="1.1.0")
+app = FastAPI(title="Trivy Docker Image Scanner", version="1.2.0")
+
+# Track whether we've already pre-warmed the Trivy vulnerability DB this
+# process. After it's been refreshed once, subsequent scans pass
+# --skip-db-update which saves ~5-10s per scan (no GitHub round-trip).
+_TRIVY_DB_READY = False
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +185,7 @@ def _run_trivy_scan(tar_path: Path, severity: str, ignore_unfixed: bool) -> dict
         "--severity", severity,
         "--scanners", "vuln",
         "--quiet",
+        *_trivy_extra_speed_flags(),
     ]
     if ignore_unfixed:
         cmd.append("--ignore-unfixed")
@@ -207,6 +213,7 @@ def _run_trivy_scan_image(image: str, severity: str, ignore_unfixed: bool) -> di
         "--severity", severity,
         "--scanners", "vuln",
         "--quiet",
+        *_trivy_extra_speed_flags(),
         image,
     ]
     if ignore_unfixed:
@@ -220,6 +227,45 @@ def _run_trivy_scan_image(image: str, severity: str, ignore_unfixed: bool) -> di
             f"{(proc.stderr or proc.stdout).strip()[:1000]}",
         )
     return _parse_trivy_report(proc.stdout)
+
+
+# ---------------------------------------------------------------------------
+# Startup: pre-warm Trivy's vulnerability DB in the background
+# ---------------------------------------------------------------------------
+import threading
+
+
+def _prewarm_trivy_db() -> None:
+    """Download the Trivy vulnerability DB at startup so the user's first scan
+    doesn't have to wait for it. Runs in a daemon thread."""
+    global _TRIVY_DB_READY
+    trivy = _trivy_path()
+    if not trivy:
+        return  # No trivy installed yet — will warm up after Install.
+    try:
+        proc = subprocess.run(
+            [trivy, "image", "--download-db-only", "--quiet"],
+            capture_output=True, text=True, timeout=600,
+        )
+        if proc.returncode == 0:
+            _TRIVY_DB_READY = True
+            print("[trivy] vulnerability DB ready (pre-warmed at startup)")
+        else:
+            print(f"[trivy] DB pre-warm exited {proc.returncode}: "
+                  f"{(proc.stderr or proc.stdout).strip()[:300]}")
+    except Exception as e:  # noqa: BLE001
+        print(f"[trivy] DB pre-warm error: {e}")
+
+
+@app.on_event("startup")
+def _on_startup() -> None:
+    threading.Thread(target=_prewarm_trivy_db, daemon=True).start()
+
+
+def _trivy_extra_speed_flags() -> list[str]:
+    """Return flags that skip the per-scan DB-update check once the DB has been
+    warmed at least once in this process."""
+    return ["--skip-db-update", "--skip-java-db-update"] if _TRIVY_DB_READY else []
 
 
 # ---------------------------------------------------------------------------
@@ -337,6 +383,12 @@ async def trivy_install(version: str = Form(...)) -> dict[str, Any]:
             )
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+    # Pre-warm the vulnerability DB in the background so the first scan after
+    # a fresh install doesn't pay the 30-90s download cost.
+    global _TRIVY_DB_READY
+    _TRIVY_DB_READY = False
+    threading.Thread(target=_prewarm_trivy_db, daemon=True).start()
 
     return {"installed": True, "version": ver, "path": str(TRIVY_BIN), "asset": asset}
 
@@ -790,6 +842,7 @@ def scan_path_stream(
         "--format", "json",
         "--severity", severity,
         "--scanners", "vuln",
+        *_trivy_extra_speed_flags(),
         # NOTE: no --quiet flag — we WANT Trivy's INFO progress output to
         # stream into the live log so the user can see what's happening.
     ]
@@ -826,6 +879,7 @@ def scan_image_stream(
         "--format", "json",
         "--severity", severity,
         "--scanners", "vuln",
+        *_trivy_extra_speed_flags(),
         img,
     ]
     if ignore_unfixed:

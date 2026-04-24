@@ -470,6 +470,14 @@
   }
   .export-btn:disabled{opacity:.5;cursor:not-allowed}
   .export-btn:disabled:hover{border-color:var(--stroke);color:var(--text);background:#ffffff08}
+  .export-btn.reset-btn{
+    background:linear-gradient(135deg,#7c5cff20,#22d3ee18);
+    border-color:#7c5cff55;color:#c4b5fd;margin-right:6px;
+  }
+  .export-btn.reset-btn:hover{
+    border-color:#7c5cff;color:#fff;
+    background:linear-gradient(135deg,#7c5cff35,#22d3ee25);
+  }
   .toolbar{display:flex;gap:12px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
   .search{flex:1;min-width:220px;position:relative}
   .search input{padding-left:38px;font-family:'Inter',sans-serif}
@@ -509,6 +517,21 @@
   .sev-badge.UNKNOWN{background:#94a3b822;color:#cbd5e1;border:1px solid #94a3b866}
 
   .table-wrap{border-radius:12px;border:1px solid var(--stroke);overflow:auto;max-height:540px}
+  .vuln-pager{
+    display:flex;align-items:center;justify-content:center;gap:14px;
+    margin-top:14px;padding:10px;
+  }
+  .vuln-pager .pager-info{font-size:12px;color:var(--text-mute);font-family:'JetBrains Mono',monospace}
+  .vuln-pager .pager-btn{
+    padding:7px 14px;border-radius:9px;
+    background:#ffffff08;border:1px solid var(--stroke);
+    color:var(--text);font-size:12px;font-weight:600;
+    cursor:pointer;transition:all .15s;font-family:inherit;
+  }
+  .vuln-pager .pager-btn:hover:not(:disabled){
+    border-color:var(--accent-2);color:var(--accent-2);
+  }
+  .vuln-pager .pager-btn:disabled{opacity:.4;cursor:not-allowed}
   .table-wrap::-webkit-scrollbar{width:8px;height:8px}
   .table-wrap::-webkit-scrollbar-thumb{background:#ffffff16;border-radius:4px}
 
@@ -559,7 +582,10 @@
   details.collapsible[open] > summary::before{transform:rotate(90deg)}
   details.collapsible > .body{padding-top:8px}
 
-  footer{margin-top:40px;text-align:center;font-size:12px;color:var(--text-mute)}
+  footer{margin-top:40px;text-align:center;font-size:12px;color:var(--text-mute);line-height:1.7}
+  footer .copyright{margin-top:6px}
+  footer a{color:var(--text-mute);text-decoration:none;border-bottom:1px dotted var(--text-mute)}
+  footer a:hover{color:var(--text)}
 
   .empty{text-align:center;padding:30px 20px;color:var(--text-mute);font-size:13px}
 
@@ -846,7 +872,13 @@
         Scan Results
       </h2>
       <div class="export-group">
-        <span class="export-label">Export:</span>
+        <button type="button" class="export-btn reset-btn" id="newScanBtn" title="Clear results and start a new scan (keeps your docker login)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 12a9 9 0 1 0 9-9"/><polyline points="3 4 3 9 8 9"/>
+          </svg>
+          New Scan
+        </button>
+        <span class="export-label" style="margin-left:6px">Export:</span>
         <button type="button" class="export-btn" id="exportHtmlBtn" title="Download as HTML">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
@@ -903,7 +935,10 @@
     </div>
   </section>
 
-  <footer>Built with FastAPI + Trivy · Modern UI 2026</footer>
+  <footer>
+    Built with FastAPI + Trivy · Modern UI 2026
+    <div class="copyright">© 2026 Sim Vattanac · <a href="mailto:vattanacsim99@gmail.com">vattanacsim99@gmail.com</a></div>
+  </footer>
 </div>
 
 <!-- Modal loading overlay removed — all progress is now shown in the live log panel. -->
@@ -1702,47 +1737,101 @@ function renderResults(j){
   $("resultsCard").scrollIntoView({behavior:"smooth",block:"start"});
 }
 
-function renderTable(){
+// Pagination + windowed rendering — only paint the current page of rows so
+// huge result sets (1000+ CVEs) don't freeze the browser.
+const ROWS_PER_PAGE = 100;
+let currentPage = 1;
+let filteredRows = [];
+
+function _filterAndSortRows(){
   const q = $("searchInput").value.toLowerCase().trim();
-  const body = $("vulnBody");
   const sevOrder = {CRITICAL:0,HIGH:1,MEDIUM:2,LOW:3,UNKNOWN:4};
-  const rows = lastVulns
+  return lastVulns
     .filter(v => activeSevs.has(v.severity))
     .filter(v => !q ||
       (v.id||"").toLowerCase().includes(q) ||
       (v.pkg||"").toLowerCase().includes(q) ||
       (v.title||"").toLowerCase().includes(q))
     .sort((a,b)=>(sevOrder[a.severity]-sevOrder[b.severity]) || (a.pkg||"").localeCompare(b.pkg||""));
+}
 
-  if(!rows.length){
+function renderTable(resetPage){
+  if(resetPage !== false) currentPage = 1;
+  filteredRows = _filterAndSortRows();
+  paintPage();
+  paintPager();
+}
+
+function paintPage(){
+  const body = $("vulnBody");
+  if(!filteredRows.length){
     body.innerHTML = '<tr><td colspan="5"><div class="empty">No vulnerabilities match the current filters.</div></td></tr>';
     return;
   }
-  body.innerHTML = "";
-  rows.forEach(v=>{
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td class="cve">${escapeHtml(v.id)}</td>
-      <td class="pkg">${escapeHtml(v.pkg)}</td>
-      <td class="ver">${escapeHtml(v.installed)}</td>
-      <td class="ver">${v.fixed ? escapeHtml(v.fixed) : '<span style="color:var(--text-mute)">—</span>'}</td>
-      <td><span class="sev-badge ${v.severity}">${v.severity}</span></td>`;
-    const det = document.createElement("tr");
-    det.className = "detail-row";
-    det.style.display = "none";
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / ROWS_PER_PAGE));
+  if(currentPage > totalPages) currentPage = totalPages;
+  const start = (currentPage - 1) * ROWS_PER_PAGE;
+  const slice = filteredRows.slice(start, start + ROWS_PER_PAGE);
+
+  // Build HTML as a single string and assign once — faster than appending
+  // hundreds of nodes one at a time.
+  const parts = [];
+  slice.forEach((v, idx) => {
+    const detailId = "detail-" + (start + idx);
     const refsHtml = (v.references||[]).slice(0,5).map(r=>`<a href="${escapeHtml(r)}" target="_blank" rel="noopener">${escapeHtml(r)}</a>`).join("<br>");
-    det.innerHTML = `<td colspan="5">
-      <div class="detail-grid">
-        <div><strong>Title</strong></div><div>${escapeHtml(v.title) || "—"}</div>
-        <div><strong>Description</strong></div><div>${escapeHtml(v.description) || "—"}</div>
-        <div><strong>Target</strong></div><div>${escapeHtml(v.target) || "—"} <span style="color:var(--text-mute)">(${escapeHtml(v.type) || ""})</span></div>
-        <div><strong>Primary URL</strong></div><div>${v.primary_url?`<a href="${escapeHtml(v.primary_url)}" target="_blank" rel="noopener">${escapeHtml(v.primary_url)}</a>`:"—"}</div>
-        <div><strong>References</strong></div><div>${refsHtml||"—"}</div>
-      </div></td>`;
-    tr.addEventListener("click",()=>{det.style.display = det.style.display==="none"?"table-row":"none"});
-    body.appendChild(tr);
-    body.appendChild(det);
+    parts.push(`
+      <tr data-detail="${detailId}">
+        <td class="cve">${escapeHtml(v.id)}</td>
+        <td class="pkg">${escapeHtml(v.pkg)}</td>
+        <td class="ver">${escapeHtml(v.installed)}</td>
+        <td class="ver">${v.fixed ? escapeHtml(v.fixed) : '<span style="color:var(--text-mute)">—</span>'}</td>
+        <td><span class="sev-badge ${v.severity}">${v.severity}</span></td>
+      </tr>
+      <tr class="detail-row" id="${detailId}" style="display:none">
+        <td colspan="5">
+          <div class="detail-grid">
+            <div><strong>Title</strong></div><div>${escapeHtml(v.title) || "—"}</div>
+            <div><strong>Description</strong></div><div>${escapeHtml(v.description) || "—"}</div>
+            <div><strong>Target</strong></div><div>${escapeHtml(v.target) || "—"} <span style="color:var(--text-mute)">(${escapeHtml(v.type) || ""})</span></div>
+            <div><strong>Primary URL</strong></div><div>${v.primary_url?`<a href="${escapeHtml(v.primary_url)}" target="_blank" rel="noopener">${escapeHtml(v.primary_url)}</a>`:"—"}</div>
+            <div><strong>References</strong></div><div>${refsHtml||"—"}</div>
+          </div>
+        </td>
+      </tr>`);
   });
+  body.innerHTML = parts.join("");
+
+  // Use event delegation — one listener for the whole tbody, not 100 per page
+  body.onclick = function(e){
+    const tr = e.target.closest("tr[data-detail]");
+    if(!tr) return;
+    const det = document.getElementById(tr.dataset.detail);
+    if(det) det.style.display = (det.style.display === "none" ? "table-row" : "none");
+  };
+}
+
+function paintPager(){
+  let pager = $("vulnPager");
+  if(!pager){
+    pager = document.createElement("div");
+    pager.id = "vulnPager";
+    pager.className = "vuln-pager";
+    $("resultsCard").appendChild(pager);
+  }
+  const total = filteredRows.length;
+  const totalPages = Math.max(1, Math.ceil(total / ROWS_PER_PAGE));
+  if(total <= ROWS_PER_PAGE){
+    pager.innerHTML = total ? `<span class="pager-info">Showing all ${total} of ${total}</span>` : "";
+    return;
+  }
+  const start = (currentPage - 1) * ROWS_PER_PAGE + 1;
+  const end = Math.min(currentPage * ROWS_PER_PAGE, total);
+  pager.innerHTML = `
+    <button class="pager-btn" id="pgPrev" ${currentPage<=1?"disabled":""}>← Prev</button>
+    <span class="pager-info">Showing ${start}–${end} of ${total} · Page ${currentPage} / ${totalPages}</span>
+    <button class="pager-btn" id="pgNext" ${currentPage>=totalPages?"disabled":""}>Next →</button>`;
+  $("pgPrev").onclick = ()=>{ if(currentPage>1){currentPage--; paintPage(); paintPager();} };
+  $("pgNext").onclick = ()=>{ if(currentPage<totalPages){currentPage++; paintPage(); paintPager(); document.querySelector(".table-wrap").scrollTop=0;} };
 }
 
 $("searchInput").addEventListener("input", renderTable);
@@ -1874,6 +1963,57 @@ async function exportTo(format){
 $("exportHtmlBtn").addEventListener("click", () => exportTo("html"));
 $("exportXlsxBtn").addEventListener("click", () => exportTo("xlsx"));
 $("exportPdfBtn").addEventListener("click", () => exportTo("pdf"));
+
+// ---- New Scan / Reset ----
+function resetForNewScan(){
+  // 1. Image URL list back to ONE empty row
+  imageList.innerHTML = "";
+  addImageRow();
+
+  // 2. Clear pull results
+  $("pullResults").innerHTML =
+    '<div class="empty">No pulls yet — add image URLs above and click "Pull &amp; save all".</div>';
+
+  // 3. Hide and clear the live log
+  liveLog.classList.remove("show");
+  liveLogBody.innerHTML = "";
+  liveLogDot.className = "dot";
+  liveLogLabel.textContent = "Working…";
+
+  // 4. Hide and clear the Scan Results
+  $("resultsCard").classList.remove("show");
+  ["CRITICAL","HIGH","MEDIUM","LOW","UNKNOWN"].forEach(k => $("c"+k).textContent = "0");
+  $("vulnBody").innerHTML = "";
+  const pager = $("vulnPager"); if(pager) pager.innerHTML = "";
+  $("scanMeta").textContent = "";
+  $("searchInput").value = "";
+
+  // 5. Clear scan state
+  lastResult = null;
+  lastVulns = [];
+  filteredRows = [];
+  currentPage = 1;
+  activeSevs = new Set(["CRITICAL","HIGH","MEDIUM","LOW","UNKNOWN"]);
+  document.querySelectorAll(".sev-chip").forEach(c => c.classList.add("on"));
+
+  // 6. Clear the uploaded tar file (if any)
+  currentFile = null;
+  fileInput.value = "";
+  fileTag.classList.remove("show");
+  $("scanBtn").disabled = true;
+
+  // 7. Scroll back to the top
+  window.scrollTo({top: 0, behavior: "smooth"});
+
+  // What we INTENTIONALLY keep:
+  //   • Docker login banner + session  (so you don't have to log in again)
+  //   • Output directory text          (likely the same target folder)
+  //   • Severity filter checkboxes     (your scan preferences)
+  //   • Trivy install + cached DB      (server-side, can't / shouldn't undo)
+
+  toast("Ready for a new scan — login session kept", "ok");
+}
+$("newScanBtn").addEventListener("click", resetForNewScan);
 
 // init
 refreshTrivy();
